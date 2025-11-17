@@ -7,7 +7,7 @@ import UIKit
 
 /// An actor that mixies audio and video for streaming.
 public final actor MediaMixer {
-    static let defaultFrameRate: Float64 = 30
+    static let defaultFrameRate: Float64 = 60
 
     /// The error domain codes.
     public enum Error: Swift.Error {
