@@ -120,6 +120,8 @@ public struct VideoCodecSettings: Codable, Sendable {
     public var isHardwareAcceleratedEnabled: Bool
     /// Specifies the video frame interval.
     public var frameInterval: Double = 0.0
+    /// Specifies the expected frame rate for an encoder. It may optimize power consumption.
+    public var expectedFrameRate: Double?
 
     package var format: Format = .h264
 
@@ -136,7 +138,8 @@ public struct VideoCodecSettings: Codable, Sendable {
         // swiftlint:enable discouraged_optional_boolean
         dataRateLimits: [Double]? = [0.0, 0.0],
         isLowLatencyRateControlEnabled: Bool = false,
-        isHardwareAcceleratedEnabled: Bool = true
+        isHardwareAcceleratedEnabled: Bool = true,
+        expectedFrameRate: Double? = nil
     ) {
         self.videoSize = videoSize
         self.bitRate = bitRate
@@ -148,6 +151,7 @@ public struct VideoCodecSettings: Codable, Sendable {
         self.dataRateLimits = dataRateLimits
         self.isLowLatencyRateControlEnabled = isLowLatencyRateControlEnabled
         self.isHardwareAcceleratedEnabled = isHardwareAcceleratedEnabled
+        self.expectedFrameRate = expectedFrameRate
         if profileLevel.contains("HEVC") {
             self.format = .hevc
         }
@@ -175,17 +179,20 @@ public struct VideoCodecSettings: Codable, Sendable {
         if frameInterval != rhs.frameInterval {
             codec.frameInterval = frameInterval
         }
+        if expectedFrameRate != rhs.expectedFrameRate {
+            let value = if let expectedFrameRate { expectedFrameRate } else { 0.0 }
+            let option = VTSessionOption(key: .expectedFrameRate, value: value as CFNumber)
+            _ = codec.session?.setOption(option)
+        }
     }
 
     // https://developer.apple.com/documentation/videotoolbox/encoding_video_for_live_streaming
-    func options(_ codec: VideoCodec) -> Set<VTSessionOption> {
+    func makeOptions() -> Set<VTSessionOption> {
         let isBaseline = profileLevel.contains("Baseline")
         var options = Set<VTSessionOption>([
             .init(key: .realTime, value: kCFBooleanTrue),
             .init(key: .profileLevel, value: profileLevel as NSObject),
             .init(key: bitRateMode.key, value: NSNumber(value: bitRate)),
-            // It seemes that VT supports the range 0 to 30.
-            .init(key: .expectedFrameRate, value: NSNumber(value: (codec.expectedFrameRate <= 30) ? codec.expectedFrameRate : 0)),
             .init(key: .maxKeyFrameIntervalDuration, value: NSNumber(value: maxKeyFrameIntervalDuration)),
             .init(key: .allowFrameReordering, value: (allowFrameReordering ?? !isBaseline) as NSObject),
             .init(key: .pixelTransferProperties, value: [
@@ -214,7 +221,7 @@ public struct VideoCodecSettings: Codable, Sendable {
     }
 
     func makeEncoderSpecification() -> CFDictionary? {
-        if isLowLatencyRateControlEnabled, #available(iOS 14.5, macCatalyst 14.5, macOS 11.3, tvOS 14.5, visionOS 1.0, *) {
+        if isLowLatencyRateControlEnabled {
             return [kVTVideoEncoderSpecification_EnableLowLatencyRateControl: true as CFBoolean] as CFDictionary
         }
         return nil
