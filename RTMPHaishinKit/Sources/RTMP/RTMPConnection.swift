@@ -50,7 +50,7 @@ public actor RTMPConnection: HaishinKit.NetworkConnection {
     /// The default object encoding for RTMPConnection class.
     public static let defaultObjectEncoding: RTMPObjectEncoding = .amf0
     /// The default an rtmp request time out value (ms).
-    public static let defaultRequestTimeout: UInt64 = 3000
+    public static let defaultRequestTimeout: UInt64 = 15000
     /// The supported audio fourCc Information.
     public static let supportedAudioFourCcInfoMap: AMFObject = [
         RTMPAudioFourCC.opus.description: FourCcInfoMask.canEncode.rawValue
