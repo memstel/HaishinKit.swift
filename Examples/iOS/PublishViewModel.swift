@@ -1,4 +1,5 @@
 import AVFoundation
+import AVKit
 import HaishinKit
 import MediaPlayer
 import Photos
@@ -29,7 +30,7 @@ final class PublishViewModel: ObservableObject {
     @Published var showPreLiveDialog = false
     @Published private(set) var isAudioMuted = false
     @Published private(set) var isTorchEnabled = false
-    @Published private(set) var readyState: SessionReadyState = .closed
+    @Published private(set) var readyState: StreamSessionReadyState = .closed
     @Published var audioSource: AudioSource = .empty {
         didSet {
             guard audioSource != oldValue else {
@@ -69,15 +70,16 @@ final class PublishViewModel: ObservableObject {
     }
     private(set) var mixer = MediaMixer()
     private var tasks: [Task<Void, Swift.Error>] = []
-    private var session: (any Session)?
+    private var session: (any StreamSession)?
     private var recorder: StreamRecorder?
     private var currentPosition: AVCaptureDevice.Position = .back
     private var audioSourceService = AudioSourceService()
-    @ScreenActor private var videoScreenObject: VideoTrackScreenObject?
+    @ScreenActor private var videoScreenObject: VideoScreenObject?
     @ScreenActor private var currentVideoEffect: VideoEffect?
     private var volumeObserver: NSKeyValueObservation?
-    private var mtView: MTHKView?
+    private var mtView: MediaMixerOutput?
     private var isMixerReady = false
+    private var pictureInPictureController: AVPictureInPictureController?
 
     init() {
         let defaults = UserDefaults.standard
@@ -92,7 +94,7 @@ final class PublishViewModel: ObservableObject {
         }
 
         Task { @ScreenActor in
-            videoScreenObject = VideoTrackScreenObject()
+            videoScreenObject = VideoScreenObject()
         }
     }
 
@@ -233,7 +235,7 @@ final class PublishViewModel: ObservableObject {
 
     func makeSession(_ preference: PreferenceViewModel) async {
         do {
-            session = try await SessionBuilderFactory.shared.make(preference.makeURL())
+            session = try await StreamSessionBuilderFactory.shared.make(preference.makeURL())
                 .setMode(.publish)
                 .build()
             guard let session else {
@@ -290,8 +292,6 @@ final class PublishViewModel: ObservableObject {
         isMixerReady = false
         isDualCameraEnabled = false
 
-        let isGPURendererEnabled = preference.isGPURendererEnabled
-
         Task {
             tasks.forEach { $0.cancel() }
             tasks.removeAll()
@@ -308,6 +308,14 @@ final class PublishViewModel: ObservableObject {
             session = nil
 
             mixer = MediaMixer(captureSessionMode: .multi)
+
+            let viewType = preference.viewType
+            await mixer.configuration { session in
+                if session.isMultitaskingCameraAccessSupported && viewType == .pip {
+                    session.isMultitaskingCameraAccessEnabled = true
+                    logger.info("session.isMultitaskingCameraAccessEnabled")
+                }
+            }
 
             let audioCaptureMode = preference.audioCaptureMode
             await audioSourceService.setUp(preference.audioCaptureMode)
@@ -326,7 +334,7 @@ final class PublishViewModel: ObservableObject {
             videoMixerSettings.mode = .offscreen
             await mixer.setVideoMixerSettings(videoMixerSettings)
 
-            await configureScreen(isGPURendererEnabled: isGPURendererEnabled)
+            await configureScreen(isGPURendererEnabled: true)
 
             let backCamera = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back)
             let frontCamera = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front)
@@ -361,7 +369,7 @@ final class PublishViewModel: ObservableObject {
                 logger.info(error)
             }
             await makeSession(preference)
-            let isLandscape = await UIDevice.current.orientation.isLandscape
+            let isLandscape = UIDevice.current.orientation.isLandscape
             await updateVideoEncoderSize(isLandscape: isLandscape)
             let screenSize = await mixer.screen.size
             if let session = self.session {
@@ -389,7 +397,6 @@ final class PublishViewModel: ObservableObject {
 
     @ScreenActor
     private func configureScreen(isGPURendererEnabled: Bool) async {
-        await mixer.screen.isGPURendererEnabled = isGPURendererEnabled
         await mixer.screen.size = .init(width: 720, height: 1280)
         await mixer.screen.backgroundColor = UIColor.black.cgColor
     }
@@ -481,7 +488,7 @@ final class PublishViewModel: ObservableObject {
         Task { @ScreenActor in
             if isEnabled {
                 if let videoScreenObject {
-                    try? await mixer.screen.removeChild(videoScreenObject)
+                    await mixer.screen.removeChild(videoScreenObject)
                 }
                 await MainActor.run { isDualCameraEnabled = false }
             } else {
@@ -614,6 +621,20 @@ extension PublishViewModel: MTHKViewRepresentable.PreviewSource {
             self.mtView = view
             if isMixerReady {
                 await mixer.addOutput(view)
+            }
+        }
+    }
+}
+
+extension PublishViewModel: PiPHKViewRepresentable.PreviewSource {
+    nonisolated func connect(to view: PiPHKView) {
+        Task { @MainActor in
+            self.mtView = view
+            if isMixerReady {
+                await mixer.addOutput(view)
+            }
+            if pictureInPictureController == nil {
+                pictureInPictureController = AVPictureInPictureController(contentSource: .init(sampleBufferDisplayLayer: view.layer, playbackDelegate: PlaybackDelegate()))
             }
         }
     }

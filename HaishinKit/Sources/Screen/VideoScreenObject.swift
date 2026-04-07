@@ -2,8 +2,14 @@ import AVFoundation
 import CoreImage
 
 /// An object that manages offscreen rendering a video track source.
-public final class VideoTrackScreenObject: ScreenObject, ChromaKeyProcessable {
+public final class VideoScreenObject: ScreenObject, ChromaKeyProcessable {
+    private enum Keys {
+        static let track = "track"
+    }
+
+    public static let type: String = "video"
     static let capacity: Int = 3
+
     public var chromaKeyColor: CGColor?
 
     /// Specifies the track number how the displays the visual content.
@@ -31,6 +37,17 @@ public final class VideoTrackScreenObject: ScreenObject, ChromaKeyProcessable {
         frameTracker.frameRate
     }
 
+    override public var elements: [String: String] {
+        get {
+            return [
+                Keys.track: track.description
+            ]
+        }
+        set {
+            track = UInt8(newValue[Keys.track]?.description ?? "0") ?? 0
+        }
+    }
+
     override var blendMode: ScreenObject.BlendMode {
         if 0.0 < cornerRadius || chromaKeyColor != nil {
             return .alpha
@@ -43,8 +60,8 @@ public final class VideoTrackScreenObject: ScreenObject, ChromaKeyProcessable {
     private var frameTracker = FrameTracker()
 
     /// Create a screen object.
-    override public init() {
-        super.init()
+    override public init(id: String? = nil) {
+        super.init(id: id)
         do {
             queue = try TypedBlockQueue(capacity: Self.capacity, handlers: .outputPTSSortedSampleBuffers)
         } catch {
@@ -71,13 +88,6 @@ public final class VideoTrackScreenObject: ScreenObject, ChromaKeyProcessable {
             return true
         }
         return false
-    }
-
-    override public func makeImage(_ renderer: some ScreenRenderer) -> CGImage? {
-        guard let image: CIImage = makeImage(renderer) else {
-            return nil
-        }
-        return renderer.context.createCGImage(image, from: videoGravity.region(bounds, image: image.extent))
     }
 
     override public func makeImage(_ renderer: some ScreenRenderer) -> CIImage? {

@@ -10,10 +10,10 @@ final class PublishViewModel: ObservableObject {
     @Published private(set) var error: Error?
     @Published var isShowError = false
     @Published private(set) var isTorchEnabled = false
-    @Published private(set) var readyState: SessionReadyState = .closed
+    @Published private(set) var readyState: StreamSessionReadyState = .closed
     private(set) var mixer = MediaMixer(captureSessionMode: .multi)
     private var tasks: [Task<Void, Swift.Error>] = []
-    private var session: (any Session)?
+    private var session: (any StreamSession)?
     private var currentPosition: AVCaptureDevice.Position = .back
     @ScreenActor private var currentVideoEffect: VideoEffect?
 
@@ -49,7 +49,7 @@ final class PublishViewModel: ObservableObject {
     func makeSession(_ preference: PreferenceViewModel) async {
         // Make session.
         do {
-            session = try await SessionBuilderFactory.shared.make(preference.makeURL())
+            session = try await StreamSessionBuilderFactory.shared.make(preference.makeURL())
                 .setMode(.publish)
                 .build()
             guard let session else {
@@ -98,18 +98,26 @@ final class PublishViewModel: ObservableObject {
             await makeSession(preference)
         }
         Task { @ScreenActor in
-            if await preference.isGPURendererEnabled {
-                await mixer.screen.isGPURendererEnabled = true
-            } else {
-                await mixer.screen.isGPURendererEnabled = false
-            }
+            await mixer.screen.size = .init(width: 1280, height: 720)
+            await mixer.screen.backgroundColor = NSColor.black.cgColor
+
             let assetScreenObject = AssetScreenObject()
             assetScreenObject.size = .init(width: 180, height: 180)
             assetScreenObject.layoutMargin = .init(top: 16, left: 16, bottom: 0, right: 0)
             try? assetScreenObject.startReading(AVAsset(url: URL(fileURLWithPath: Bundle.main.path(forResource: "SampleVideo_360x240_5mb", ofType: "mp4") ?? "")))
             try? await mixer.screen.addChild(assetScreenObject)
-            await mixer.screen.size = .init(width: 1280, height: 720)
-            await mixer.screen.backgroundColor = NSColor.black.cgColor
+
+            let image = ImageScreenObject()
+            image.size = .init(width: 120, height: 120)
+            image.horizontalAlignment = .right
+            image.verticalAlignment = .bottom
+            image.layoutMargin = .init(top: 0, left: 0, bottom: 16, right: 16)
+            let appIconFile = URL(fileURLWithPath: Bundle.main.path(forResource: "AppIcon", ofType: "png") ?? "")
+            if let nsImage = NSImage(contentsOf: appIconFile), let cgImage = nsImage.cgImage(forProposedRect: nil, context: nil, hints: nil) {
+                let ciImage = CIImage(cgImage: cgImage)
+                image.ciImage = ciImage
+            }
+            try? await mixer.screen.addChild(image)
         }
     }
 

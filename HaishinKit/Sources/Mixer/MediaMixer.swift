@@ -17,7 +17,7 @@ public final actor MediaMixer {
     }
 
     /// An enumeration defines the capture session mode used for video/audio input.
-    public enum CaptureSessionMode: Sendable {
+    public enum CaptureSessionMode: String, Codable, Sendable {
         /// Uses a standard `AVCaptureSession`
         case single
         /// Uses an `AVCaptureMultiCamSession`

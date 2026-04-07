@@ -126,6 +126,8 @@ public actor StreamRecorder {
     private var audioPresentationTime: CMTime = .zero
     private var videoPresentationTime: CMTime = .zero
     private var dimensions: CMVideoDimensions = .init(width: 0, height: 0)
+    nonisolated(unsafe) private var inputContinuation: AsyncStream<CMSampleBuffer>.Continuation?
+    private var inputConsumerTask: Task<Void, Never>?
 
     /// Creates a new recorder.
     public init() {
@@ -191,6 +193,7 @@ public actor StreamRecorder {
         videoPresentationTime = .zero
         audioPresentationTime = .zero
         self.settings = settings
+        startInputConsumer()
 
         isRecording = true
     }
@@ -215,6 +218,7 @@ public actor StreamRecorder {
             throw Error.invalidState
         }
         defer {
+            stopInputConsumer()
             isRecording = false
             continuation = nil
             self.writer = nil
@@ -252,6 +256,23 @@ public actor StreamRecorder {
                 moviesDirectory.appendingPathComponent(url.path)
         }
         return url.pathExtension.isEmpty ? url.appendingPathComponent(UUID().uuidString).appendingPathExtension(Self.defaultPathExtension) : url
+    }
+
+    private func startInputConsumer() {
+        let (stream, continuation) = AsyncStream.makeStream(of: CMSampleBuffer.self)
+        inputContinuation = continuation
+        inputConsumerTask = Task {
+            for await sampleBuffer in stream {
+                append(sampleBuffer)
+            }
+        }
+    }
+
+    private func stopInputConsumer() {
+        inputContinuation?.finish()
+        inputContinuation = nil
+        inputConsumerTask?.cancel()
+        inputConsumerTask = nil
     }
 
     private func append(_ sampleBuffer: CMSampleBuffer) {
@@ -352,31 +373,27 @@ public actor StreamRecorder {
 extension StreamRecorder: StreamOutput {
     // MARK: HKStreamOutput
     nonisolated public func stream(_ stream: some StreamConvertible, didOutput video: CMSampleBuffer) {
-        Task { await append(video) }
+        inputContinuation?.yield(video)
     }
 
     nonisolated public func stream(_ stream: some StreamConvertible, didOutput audio: AVAudioBuffer, when: AVAudioTime) {
         guard let sampleBuffer = (audio as? AVAudioPCMBuffer)?.makeSampleBuffer(when) else {
             return
         }
-        Task { await append(sampleBuffer) }
+        inputContinuation?.yield(sampleBuffer)
     }
 }
 
 extension StreamRecorder: MediaMixerOutput {
     // MARK: MediaMixerOutput
     nonisolated public func mixer(_ mixer: MediaMixer, didOutput sampleBuffer: CMSampleBuffer) {
-        Task {
-            await append(sampleBuffer)
-        }
+        inputContinuation?.yield(sampleBuffer)
     }
 
     nonisolated public func mixer(_ mixer: MediaMixer, didOutput buffer: AVAudioPCMBuffer, when: AVAudioTime) {
         guard let sampleBuffer = buffer.makeSampleBuffer(when) else {
             return
         }
-        Task {
-            await append(sampleBuffer)
-        }
+        inputContinuation?.yield(sampleBuffer)
     }
 }
