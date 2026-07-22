@@ -3,7 +3,9 @@ import Foundation
 
 extension AVAudioCompressedBuffer {
     package func makeCompressedSampleBuffer(_ when: AVAudioTime) -> CMSampleBuffer? {
-        let sampleCount = max(1, format.streamDescription.pointee.mFramesPerPacket) * packetCount
+        // CoreMedia's numSamples is the number of packet descriptions here;
+        // each AAC packet already carries its frame count in the format.
+        let sampleCount = packetCount
         var status: OSStatus = noErr
         var sampleBuffer: CMSampleBuffer?
         status = CMAudioSampleBufferCreateWithPacketDescriptions(

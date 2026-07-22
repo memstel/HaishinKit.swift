@@ -126,6 +126,13 @@ import Testing
         #expect(sampleBuffer.formatDescription?.mediaSubType == .mpeg4AAC)
         #expect(sampleBuffer.presentationTimeStamp.isValid)
         #expect(sampleBuffer.duration.isValid)
+        #expect(sampleBuffer.numSamples == Int(compressedBuffer.packetCount))
+        #expect(sampleBuffer.duration.seconds < 0.1)
+        guard let dataBuffer = sampleBuffer.dataBuffer else {
+            Issue.record("The AAC sample buffer has no data block")
+            return
+        }
+        #expect(CMSampleBufferGetTotalSampleSize(sampleBuffer) == CMBlockBufferGetDataLength(dataBuffer))
         #expect(CMSampleBufferGetTotalSampleSize(sampleBuffer) > 0)
     }
 
