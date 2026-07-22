@@ -2,6 +2,38 @@ import AVFoundation
 import Foundation
 
 extension AVAudioCompressedBuffer {
+    package func makeCompressedSampleBuffer(_ when: AVAudioTime) -> CMSampleBuffer? {
+        let sampleCount = max(1, format.streamDescription.pointee.mFramesPerPacket) * packetCount
+        var status: OSStatus = noErr
+        var sampleBuffer: CMSampleBuffer?
+        status = CMAudioSampleBufferCreateWithPacketDescriptions(
+            allocator: nil,
+            dataBuffer: nil,
+            dataReady: false,
+            makeDataReadyCallback: nil,
+            refcon: nil,
+            formatDescription: format.formatDescription,
+            sampleCount: Int(sampleCount),
+            presentationTimeStamp: when.makeTime(),
+            packetDescriptions: packetDescriptions,
+            sampleBufferOut: &sampleBuffer
+        )
+        guard status == noErr, let sampleBuffer else {
+            return nil
+        }
+        status = CMSampleBufferSetDataBufferFromAudioBufferList(
+            sampleBuffer,
+            blockBufferAllocator: kCFAllocatorDefault,
+            blockBufferMemoryAllocator: kCFAllocatorDefault,
+            flags: 0,
+            bufferList: audioBufferList
+        )
+        guard status == noErr else {
+            return nil
+        }
+        return sampleBuffer
+    }
+
     @discardableResult
     @inline(__always)
     final func copy(_ buffer: AVAudioBuffer) -> Bool {

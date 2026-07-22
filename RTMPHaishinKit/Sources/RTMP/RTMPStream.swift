@@ -207,6 +207,7 @@ public actor RTMPStream {
         }
     }
     package var outputs: [any StreamOutput] = []
+    private var encodedOutputs: [any RTMPEncodedStreamOutput] = []
     private var frameCount: UInt16 = 0
     private var audioBuffer: AVAudioCompressedBuffer?
     private var howToPublish: RTMPStream.HowToPublish = .live
@@ -289,6 +290,7 @@ public actor RTMPStream {
         mixerAudioContinuation?.finish()
         mixerVideoContinuation?.finish()
         outputs.removeAll()
+        encodedOutputs.removeAll()
     }
 
     /// Plays a live stream from a server.
@@ -742,6 +744,19 @@ public actor RTMPStream {
 }
 
 extension RTMPStream: _Stream {
+    public func addEncodedOutput(_ observer: some RTMPEncodedStreamOutput) {
+        guard !encodedOutputs.contains(where: { $0 === observer }) else {
+            return
+        }
+        encodedOutputs.append(observer)
+    }
+
+    public func removeEncodedOutput(_ observer: some RTMPEncodedStreamOutput) {
+        if let index = encodedOutputs.firstIndex(where: { $0 === observer }) {
+            encodedOutputs.remove(at: index)
+        }
+    }
+
     public func setAudioSettings(_ audioSettings: AudioCodecSettings) throws {
         guard Self.supportedAudioCodecs.contains(audioSettings.format) else {
             throw Error.unsupportedCodec
@@ -765,6 +780,9 @@ extension RTMPStream: _Stream {
                     let timedelta = try videoTimestamp.update(decodeTimeStamp)
                     frameCount += 1
                     videoFormat = sampleBuffer.formatDescription
+                    encodedOutputs.forEach {
+                        $0.stream(self, didOutputEncoded: sampleBuffer)
+                    }
                     guard let message = RTMPVideoMessage(streamId: id, timestamp: timedelta, sampleBuffer: sampleBuffer) else {
                         return
                     }
@@ -802,6 +820,11 @@ extension RTMPStream: _Stream {
             do {
                 let timedelta = try audioTimestamp.update(when)
                 audioFormat = audioBuffer.format
+                if !encodedOutputs.isEmpty, let sampleBuffer = audioBuffer.makeCompressedSampleBuffer(when) {
+                    encodedOutputs.forEach {
+                        $0.stream(self, didOutputEncoded: sampleBuffer)
+                    }
+                }
                 guard let message = RTMPAudioMessage(streamId: id, timestamp: timedelta, audioBuffer: audioBuffer) else {
                     return
                 }

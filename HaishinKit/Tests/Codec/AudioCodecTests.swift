@@ -105,6 +105,30 @@ import Testing
         #expect(encoder.outputFormat?.sampleRate == 44100)
     }
 
+    @Test func compressedOutputMakesAACSampleBuffer() async {
+        let encoder = HaishinKit.AudioCodec()
+        encoder.startRunning()
+        var iterator = encoder.outputStream.makeAsyncIterator()
+        for _ in 0..<10 {
+            if let sampleBuffer = AVAudioPCMBufferFactory.makeSinWave(44100.0, numSamples: 1024) {
+                encoder.append(sampleBuffer, when: .init())
+            }
+        }
+
+        let output = await iterator.next()
+        #expect(output != nil)
+        guard let (audioBuffer, when) = output,
+              let compressedBuffer = audioBuffer as? AVAudioCompressedBuffer,
+              let sampleBuffer = compressedBuffer.makeCompressedSampleBuffer(when) else {
+            return
+        }
+        #expect(sampleBuffer.formatDescription?.mediaType == .audio)
+        #expect(sampleBuffer.formatDescription?.mediaSubType == .mpeg4AAC)
+        #expect(sampleBuffer.presentationTimeStamp.isValid)
+        #expect(sampleBuffer.duration.isValid)
+        #expect(CMSampleBufferGetTotalSampleSize(sampleBuffer) > 0)
+    }
+
     @Test func test3Channel_withoutCrash() {
         let encoder = HaishinKit.AudioCodec()
         encoder.startRunning()
