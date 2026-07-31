@@ -9,7 +9,7 @@ import Testing
         try await recorder.startRecording(nil)
         let moviesDirectory = await recorder.moviesDirectory
         // $moviesDirectory/B644F60F-0959-4F54-9D14-7F9949E02AD8.mp4
-        #expect(((await recorder.outputURL?.path.contains(moviesDirectory.path())) != nil))
+        #expect(((await recorder.outputURL?.path.contains(moviesDirectory.path)) != nil))
     }
 
     @Test func startRunning_fileName() async throws {
