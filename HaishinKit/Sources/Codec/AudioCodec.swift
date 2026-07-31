@@ -1,8 +1,16 @@
 import AVFoundation
 
+enum AudioCodecError: Swift.Error {
+    case failedToConvert(NSError)
+    case failedToDrain(NSError)
+    case codecRestartRequired
+}
+
 /// The AudioCodec translate audio data to another format.
 /// - seealso: https://developer.apple.com/library/ios/technotes/tn2236/_index.html
-final class AudioCodec {
+final class AudioCodec: @unchecked Sendable {
+    typealias OutputObserver = @Sendable (AVAudioBuffer, AVAudioTime) -> Void
+
     static let defaultFrameCapacity: UInt32 = 1024
     static let defaultInputBuffersCursor = 0
 
@@ -47,6 +55,15 @@ final class AudioCodec {
     private var outputBuffers: [AVAudioBuffer] = []
     private var audioConverter: AVAudioConverter?
     private var inputBuffersCursor = AudioCodec.defaultInputBuffersCursor
+    private let outputObserver: OutputObserver
+
+    init(outputObserver: @escaping OutputObserver = { _, _ in }) {
+        self.outputObserver = outputObserver
+    }
+
+    var pendingInputFrameCount: Int {
+        ringBuffer?.counts ?? 0
+    }
 
     func append(_ sampleBuffer: CMSampleBuffer) {
         guard isRunning else {
@@ -81,6 +98,37 @@ final class AudioCodec {
     }
 
     func append(_ audioBuffer: AVAudioBuffer, when: AVAudioTime) {
+        do {
+            try append(
+                audioBuffer,
+                when: when,
+                allowsConverterRecreation: true
+            )
+        } catch {
+            logger.warn(error)
+        }
+    }
+
+    func appendOrThrow(_ audioBuffer: AVAudioBuffer, when: AVAudioTime) throws {
+        try append(
+            audioBuffer,
+            when: when,
+            allowsConverterRecreation: false
+        )
+    }
+
+    private func append(
+        _ audioBuffer: AVAudioBuffer,
+        when: AVAudioTime,
+        allowsConverterRecreation: Bool
+    ) throws {
+        if
+            let inputFormat,
+            inputFormat != audioBuffer.format,
+            isRunning,
+            !allowsConverterRecreation {
+            throw AudioCodecError.codecRestartRequired
+        }
         inputFormat = audioBuffer.format
         guard let audioConverter, isRunning else {
             return
@@ -116,13 +164,17 @@ final class AudioCodec {
                     return nil
                 }
             }
+            if let error {
+                releaseOutputBuffer(outputBuffer)
+                throw AudioCodecError.failedToConvert(error)
+            }
             switch outputStatus {
             case .haveData:
                 if audioTime.hasAnchor {
                     audioTime.advanced(AVAudioFramePosition(audioConverter.outputFormat.streamDescription.pointee.mFramesPerPacket))
-                    _outputStream.yield((outputBuffer, audioTime.at))
+                    yieldOutput(outputBuffer, when: audioTime.at)
                 } else {
-                    _outputStream.yield((outputBuffer, audioTime.at))
+                    yieldOutput(outputBuffer, when: audioTime.at)
                 }
                 inputBuffersCursor += 1
                 if inputBuffersCursor == inputBuffers.count {
@@ -189,6 +241,11 @@ extension AudioCodec: Codec {
         outputBuffers.append(buffer)
     }
 
+    private func yieldOutput(_ buffer: AVAudioBuffer, when: AVAudioTime) {
+        outputObserver(buffer, when)
+        _outputStream.yield((buffer, when))
+    }
+
     private var inputBuffer: AVAudioBuffer {
         return inputBuffers[inputBuffersCursor]
     }
@@ -212,5 +269,55 @@ extension AudioCodec: Runner {
         }
         isRunning = false
         _outputStream.finish()
+        inputFormat = nil
+    }
+
+    func stopRunningAndDrain() throws {
+        guard isRunning else {
+            return
+        }
+        defer {
+            stopRunning()
+        }
+        guard let audioConverter else {
+            return
+        }
+
+        var outputStatus: AVAudioConverterOutputStatus = .haveData
+        repeat {
+            let outputBuffer = self.outputBuffer
+            var error: NSError?
+            outputStatus = audioConverter.convert(to: outputBuffer, error: &error) { inNumberFrames, inputStatus in
+                guard
+                    let inputBuffer = self.inputBuffer as? AVAudioPCMBuffer,
+                    let ringBuffer = self.ringBuffer,
+                    0 < ringBuffer.counts else {
+                    inputStatus.pointee = .endOfStream
+                    return nil
+                }
+                inputBuffer.frameLength = min(inNumberFrames, AVAudioFrameCount(ringBuffer.counts))
+                _ = ringBuffer.render(
+                    inputBuffer.frameLength,
+                    ioData: inputBuffer.mutableAudioBufferList
+                )
+                inputStatus.pointee = .haveData
+                return inputBuffer
+            }
+            if let error {
+                releaseOutputBuffer(outputBuffer)
+                throw AudioCodecError.failedToDrain(error)
+            }
+            switch outputStatus {
+            case .haveData:
+                if audioTime.hasAnchor {
+                    audioTime.advanced(AVAudioFramePosition(
+                        audioConverter.outputFormat.streamDescription.pointee.mFramesPerPacket
+                    ))
+                }
+                yieldOutput(outputBuffer, when: audioTime.at)
+            default:
+                releaseOutputBuffer(outputBuffer)
+            }
+        } while outputStatus == .haveData
     }
 }

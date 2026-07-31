@@ -7,6 +7,14 @@ extension VTDecompressionSession: VTSessionConvertible {
         ._EnableTemporalProcessing
     ]
 
+    func waitForAsynchronousFrames() -> OSStatus {
+        VTDecompressionSessionWaitForAsynchronousFrames(self)
+    }
+
+    func completeFrames() -> OSStatus {
+        waitForAsynchronousFrames()
+    }
+
     @inline(__always)
     func convert(_ sampleBuffer: CMSampleBuffer, continuation: AsyncStream<CMSampleBuffer>.Continuation?) throws {
         var flagsOut: VTDecodeInfoFlags = []

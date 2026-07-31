@@ -6,13 +6,36 @@ enum VTSessionError: Swift.Error {
     case failedToCreate(status: OSStatus)
     case failedToPrepare(status: OSStatus)
     case failedToConvert(status: OSStatus)
+    case failedToComplete(status: OSStatus)
+    case codecRestartRequired
 }
 
 protocol VTSessionConvertible {
     func setOption(_ option: VTSessionOption) -> OSStatus
     func setOptions(_ options: Set<VTSessionOption>) -> OSStatus
     func convert(_ sampleBuffer: CMSampleBuffer, continuation: AsyncStream<CMSampleBuffer>.Continuation?) throws
+    func convert(
+        _ sampleBuffer: CMSampleBuffer,
+        continuation: AsyncStream<CMSampleBuffer>.Continuation?,
+        forceKeyFrame: Bool,
+        failureHandler: @escaping @Sendable (VTSessionError) -> Void
+    ) throws
+    func completeFrames() -> OSStatus
     func invalidate()
+}
+
+extension VTSessionConvertible {
+    func convert(
+        _ sampleBuffer: CMSampleBuffer,
+        continuation: AsyncStream<CMSampleBuffer>.Continuation?,
+        forceKeyFrame: Bool,
+        failureHandler: @escaping @Sendable (VTSessionError) -> Void
+    ) throws {
+        try convert(
+            sampleBuffer,
+            continuation: continuation
+        )
+    }
 }
 
 extension VTSessionConvertible where Self: VTSession {

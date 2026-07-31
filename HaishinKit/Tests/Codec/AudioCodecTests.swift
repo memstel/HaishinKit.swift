@@ -136,11 +136,127 @@ import Testing
         #expect(CMSampleBufferGetTotalSampleSize(sampleBuffer) > 0)
     }
 
+    @Test func stopRunningAndDrainEmitsNonFrameAlignedAACTail() async throws {
+        let emissionSpy = AudioEmissionSpy()
+        let encoder = HaishinKit.AudioCodec(
+            outputObserver: emissionSpy.record
+        )
+        var iterator = encoder.outputStream.makeAsyncIterator()
+        encoder.startRunning()
+        let input = try #require(AVAudioPCMBufferFactory.makeSinWave(
+            44_100,
+            numSamples: 1_500
+        ))
+
+        encoder.append(input, when: AVAudioTime(sampleTime: 0, atRate: 44_100))
+        let framesPerPacket = try #require(
+            encoder.outputFormat?.streamDescription.pointee.mFramesPerPacket
+        )
+        #expect(framesPerPacket > 0)
+        let expectedTailFrameCount = UInt32(input.frameLength) % framesPerPacket
+        #expect(expectedTailFrameCount != 0)
+        #expect(encoder.pendingInputFrameCount == Int(expectedTailFrameCount))
+        let preDrainPacketCount = emissionSpy.packetCount
+        #expect(preDrainPacketCount > 0)
+        try encoder.stopRunningAndDrain()
+
+        var packetCount: UInt32 = 0
+        while let (buffer, _) = await iterator.next() {
+            packetCount += (buffer as? AVAudioCompressedBuffer)?.packetCount ?? 0
+        }
+        #expect(encoder.pendingInputFrameCount == 0)
+        #expect(packetCount == emissionSpy.packetCount)
+        #expect(packetCount > preDrainPacketCount)
+        #expect(
+            (packetCount - preDrainPacketCount) * framesPerPacket
+                >= expectedTailFrameCount
+        )
+    }
+
+    @Test func appendRejectsConverterRecreationInsideRunningEpoch() throws {
+        let encoder = HaishinKit.AudioCodec()
+        encoder.startRunning()
+        let first = try #require(AVAudioPCMBufferFactory.makeSinWave(
+            44_100,
+            numSamples: 1_024
+        ))
+        try encoder.appendOrThrow(
+            first,
+            when: AVAudioTime(sampleTime: 0, atRate: 44_100)
+        )
+        let changed = try #require(AVAudioPCMBufferFactory.makeSinWave(
+            48_000,
+            numSamples: 1_024
+        ))
+
+        do {
+            try encoder.appendOrThrow(
+                changed,
+                when: AVAudioTime(sampleTime: 1_024, atRate: 48_000)
+            )
+            Issue.record("Expected a changed audio input format to require a new codec epoch")
+        } catch {
+            #expect(encoder.outputFormat?.sampleRate == 44_100)
+        }
+    }
+
+    @Test func cleanStopAllowsDifferentInputFormatInNextEpoch() throws {
+        let encoder = HaishinKit.AudioCodec()
+        _ = encoder.outputStream
+        encoder.startRunning()
+        let firstEpochInput = try #require(AVAudioPCMBufferFactory.makeSinWave(
+            44_100,
+            numSamples: 1_024
+        ))
+        try encoder.appendOrThrow(
+            firstEpochInput,
+            when: AVAudioTime(sampleTime: 0, atRate: 44_100)
+        )
+        try encoder.stopRunningAndDrain()
+
+        _ = encoder.outputStream
+        encoder.startRunning()
+        let secondEpochInput = try #require(AVAudioPCMBufferFactory.makeSinWave(
+            48_000,
+            numSamples: 1_024
+        ))
+
+        try encoder.appendOrThrow(
+            secondEpochInput,
+            when: AVAudioTime(sampleTime: 0, atRate: 48_000)
+        )
+
+        #expect(encoder.outputFormat?.sampleRate == 48_000)
+        try encoder.stopRunningAndDrain()
+    }
+
     @Test func test3Channel_withoutCrash() {
         let encoder = HaishinKit.AudioCodec()
         encoder.startRunning()
         if let sampleBuffer = CMAudioSampleBufferFactory.makeSilence(44100, numSamples: 256, channels: 3) {
             encoder.append(sampleBuffer)
+        }
+    }
+
+    private final class AudioEmissionSpy: @unchecked Sendable {
+        private let lock = NSLock()
+        private var storedPacketCount: UInt32 = 0
+
+        var packetCount: UInt32 {
+            lock.withLock {
+                storedPacketCount
+            }
+        }
+
+        var record: @Sendable (AVAudioBuffer, AVAudioTime) -> Void {
+            { [weak self] buffer, _ in
+                guard let compressedBuffer = buffer as? AVAudioCompressedBuffer else {
+                    return
+                }
+                self?.lock.withLock {
+                    self?.storedPacketCount += compressedBuffer.packetCount
+                }
+            }
         }
     }
 }

@@ -428,6 +428,34 @@ struct RTMPAudioMessage: RTMPMessage {
         }
     }
 
+    init?(streamId: UInt32, timestamp: UInt32, sampleBuffer: CMSampleBuffer?) {
+        guard
+            let sampleBuffer,
+            let formatDescription = sampleBuffer.formatDescription,
+            let data = try? sampleBuffer.dataBuffer?.dataBytes()
+        else {
+            return nil
+        }
+        self.streamId = streamId
+        self.timestamp = timestamp
+        switch formatDescription.mediaSubType {
+        case .opus:
+            var buffer = Data([
+                RTMPAudioCodec.exheader.rawValue << 4
+                    | RTMPAudioPacketType.codedFrames.rawValue
+            ])
+            buffer.append(contentsOf: RTMPAudioFourCC.opus.rawValue.bigEndian.data)
+            buffer.append(data)
+            self.payload = buffer
+        case .mpeg4AAC:
+            var buffer = Data([Self.aacHeader, RTMPAACPacketType.raw.rawValue])
+            buffer.append(data)
+            self.payload = buffer
+        default:
+            return nil
+        }
+    }
+
     func copyMemory(_ audioBuffer: AVAudioCompressedBuffer?) {
         payload.withUnsafeBytes { (buffer: UnsafeRawBufferPointer) in
             guard let baseAddress = buffer.baseAddress, let audioBuffer else {
