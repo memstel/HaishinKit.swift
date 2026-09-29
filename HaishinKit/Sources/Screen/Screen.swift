@@ -212,6 +212,18 @@ public final class Screen: ScreenObjectContainerConvertible {
         videoCaptureLatency = diff
     }
 
+    /// Forgets the previous offscreen session's render target and capture
+    /// latency. Without this, the first camera frame after a passthrough →
+    /// offscreen re-entry is measured against a target from before the
+    /// passthrough period: the latency turns negative, one output frame is
+    /// stamped that far ahead, and every following frame is dropped until real
+    /// time catches up. The last output timestamp is kept, so output stays
+    /// monotonic.
+    func resetTiming() {
+        targetTimestamp = 0
+        videoCaptureLatency = 0
+    }
+
     func reset() {
         let screens: [VideoScreenObject] = root.getScreenObjects()
         for screen in screens {
