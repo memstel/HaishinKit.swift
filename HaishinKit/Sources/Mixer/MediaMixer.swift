@@ -380,9 +380,6 @@ public final actor MediaMixer {
             }
         case .offscreen:
             Task { @ScreenActor in
-                // Each offscreen session measures capture latency against its
-                // own renders, not the targets of a session before passthrough.
-                screen.resetTiming()
                 displayLink.preferredFramesPerSecond = await Int(frameRate)
                 displayLink.startRunning()
                 for await updateFrame in displayLink.updateFrames {
