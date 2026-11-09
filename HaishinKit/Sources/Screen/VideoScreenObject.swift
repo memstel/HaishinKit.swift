@@ -89,12 +89,9 @@ public final class VideoScreenObject: ScreenObject, ChromaKeyProcessable {
     }
 
     override public func makeImage(_ renderer: some ScreenRenderer) -> CIImage? {
-        let presentationTimeStamp = renderer.presentationTimeStamp.convertTime(from: CMClockGetHostTimeClock(), to: renderer.synchronizationClock)
-        guard let sampleBuffer = queue?.dequeue(presentationTimeStamp),
-              let pixelBuffer = sampleBuffer.imageBuffer else {
+        guard let pixelBuffer = dequeuePixelBuffer(renderer) else {
             return nil
         }
-        frameTracker.update(sampleBuffer.presentationTimeStamp)
         // Resizing before applying the filter for performance optimization.
         var image = CIImage(cvPixelBuffer: pixelBuffer, options: renderer.imageOptions).transformed(by: videoGravity.scale(
             bounds.size,
@@ -108,6 +105,27 @@ public final class VideoScreenObject: ScreenObject, ChromaKeyProcessable {
             }
             return image
         }
+    }
+
+    /// The frame to show now (`makeImage` without Core Image, for `ScreenRendererByMetal`).
+    func dequeuePixelBuffer(_ renderer: some ScreenRenderer) -> CVPixelBuffer? {
+        let presentationTimeStamp = renderer.presentationTimeStamp.convertTime(from: CMClockGetHostTimeClock(), to: renderer.synchronizationClock)
+        guard let sampleBuffer = queue?.dequeue(presentationTimeStamp),
+              let pixelBuffer = sampleBuffer.imageBuffer else {
+            return nil
+        }
+        frameTracker.update(sampleBuffer.presentationTimeStamp)
+        return pixelBuffer
+    }
+
+    /// Whether every effect only lays an image over the video (`ScreenRendererByMetal` then draws them as layers).
+    var effectsAreOverlays: Bool {
+        effects.allSatisfy { $0 is any VideoOverlayEffect }
+    }
+
+    /// The effects' images over a video image of `extent`, in their order.
+    func overlayImages(over extent: CGRect) -> [CIImage] {
+        effects.compactMap { ($0 as? any VideoOverlayEffect)?.overlayImage(over: extent) }
     }
 
     override public func makeBounds(_ size: CGSize) -> CGRect {

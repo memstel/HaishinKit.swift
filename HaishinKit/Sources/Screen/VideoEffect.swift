@@ -25,3 +25,13 @@ public protocol VideoEffect: AnyObject {
     /// Executes to apply a video effect.
     func execute(_ image: CIImage) -> CIImage
 }
+
+/// A video effect that only lays an image over the video: `execute(image)` is `overlayImage(over: image.extent)`
+/// composited over `image` (source-over), or `image` itself when that is nil.
+///
+/// `ScreenRendererByMetal` draws the overlay as a layer of its own right above the video (rendered by Core Image only
+/// when the effect hands a new image), instead of running the effect over the whole picture on every frame.
+public protocol VideoOverlayEffect: VideoEffect {
+    /// The image laid over a video image of `extent`, in the same coordinates; the same instance while it is unchanged.
+    func overlayImage(over extent: CGRect) -> CIImage?
+}

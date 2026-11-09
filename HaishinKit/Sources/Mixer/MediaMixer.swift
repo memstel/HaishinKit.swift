@@ -123,7 +123,19 @@ public final actor MediaMixer {
 
     public private(set) var isRunning = false
 
+    /// A camera frame for the offscreen screen, with the settings it arrived under.
+    private struct ScreenInput: @unchecked Sendable {
+        let track: UInt8
+        let sampleBuffer: CMSampleBuffer
+        let isOffscreen: Bool
+        let isMainTrack: Bool
+    }
+
+    /// Camera frames in flight to the screen: a few per track at most (the screen keeps the newest three anyway).
+    private static let screenInputBuffering = 8
+
     private var outputs: [any MediaMixerOutput] = []
+    private var screenInput: AsyncStream<ScreenInput>.Continuation?
     private var subscriptions: [Task<Void, Never>] = []
     private var isInBackground = false
     private lazy var audioIO = AudioCaptureUnit(session, isMultiTrackAudioMixingEnabled: isMultiTrackAudioMixingEnabled)
@@ -486,23 +498,39 @@ extension MediaMixer: AsyncRunner {
         if #available(tvOS 17.0, *) {
             startCapturing()
         }
+        // One consumer on the screen's actor takes the camera frames in order (a task per frame cost a task and a hop
+        // back here for the settings, 60 times a second).
+        let (screenInputs, screenInput) = AsyncStream.makeStream(
+            of: ScreenInput.self,
+            bufferingPolicy: .bufferingNewest(Self.screenInputBuffering)
+        )
+        self.screenInput = screenInput
+        // Holds the screen, not the mixer: a stopped mixer is released at once.
+        Task { @ScreenActor [weak self] in
+            guard let screen = self?.screen else {
+                return
+            }
+            for await input in screenInputs where input.isOffscreen {
+                screen.append(input.track, buffer: input.sampleBuffer)
+                if input.isMainTrack {
+                    screen.setVideoCaptureLatency(input.sampleBuffer.presentationTimeStamp)
+                }
+            }
+        }
         Task {
             for await inputs in videoIO.inputs {
-                Task { @ScreenActor in
-                    let videoMixerSettings = await self.videoMixerSettings
-                    guard videoMixerSettings.mode == .offscreen else {
-                        return
-                    }
-                    let sampleBuffer = inputs.1
-                    screen.append(inputs.0, buffer: sampleBuffer)
-                    if videoMixerSettings.mainTrack == inputs.0 {
-                        screen.setVideoCaptureLatency(sampleBuffer.presentationTimeStamp)
-                    }
-                }
+                let videoMixerSettings = self.videoMixerSettings
+                screenInput.yield(ScreenInput(
+                    track: inputs.0,
+                    sampleBuffer: inputs.1,
+                    isOffscreen: videoMixerSettings.mode == .offscreen,
+                    isMainTrack: videoMixerSettings.mainTrack == inputs.0
+                ))
                 for output in outputs where await output.videoTrackId == inputs.0 {
                     output.mixer(self, didOutput: inputs.1)
                 }
             }
+            screenInput.finish()
         }
         Task {
             for await video in videoIO.output {
@@ -555,6 +583,8 @@ extension MediaMixer: AsyncRunner {
         }
         audioIO.finish()
         videoIO.finish()
+        screenInput?.finish()
+        screenInput = nil
         subscriptions.forEach { $0.cancel() }
         subscriptions.removeAll()
         // Wait for the task to finish to prevent memory leaks.

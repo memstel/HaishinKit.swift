@@ -15,6 +15,15 @@ public protocol ScreenDelegate: AnyObject {
     func screen(_ screen: Screen, willLayout time: CMTime)
 }
 
+/// How a screen composes its objects.
+public enum ScreenRenderingBackend: Sendable {
+    /// Core Image renders the whole picture every frame (`ScreenRendererByGPU`).
+    case coreImage
+    /// Metal composes textures of the objects; Core Image renders an object only when it hands a new image
+    /// (`ScreenRendererByMetal`). SDR only; elsewhere the screen keeps Core Image.
+    case metal
+}
+
 /// An object that manages offscreen rendering a foundation.
 public final class Screen: ScreenObjectContainerConvertible {
     /// The default screen size.
@@ -84,9 +93,24 @@ public final class Screen: ScreenObjectContainerConvertible {
             guard dynamicRangeMode != oldValue else {
                 return
             }
-            renderer = ScreenRendererByGPU(dynamicRangeMode: dynamicRangeMode)
+            renderer = makeRenderer()
             CVPixelBufferPoolCreate(nil, nil, dynamicRangeMode.makePixelBufferAttributes(size), &pixelBufferPool)
         }
+    }
+
+    /// How the screen composes its objects. `.metal` falls back to Core Image where Metal is missing or not SDR.
+    public var renderingBackend: ScreenRenderingBackend = .coreImage {
+        didSet {
+            guard renderingBackend != oldValue else {
+                return
+            }
+            renderer = makeRenderer()
+        }
+    }
+
+    /// Whether the screen composes with Metal now.
+    public var isRenderingWithMetal: Bool {
+        renderer is ScreenRendererByMetal
     }
     private(set) var renderer: (any ScreenRenderer) = ScreenRendererByGPU(dynamicRangeMode: .sdr) {
         didSet {
@@ -195,9 +219,15 @@ public final class Screen: ScreenObjectContainerConvertible {
     }
 
     func render(_ sampleBuffer: CMSampleBuffer) -> CMSampleBuffer {
-        try? sampleBuffer.imageBuffer?.lockBaseAddress(Self.lockFlags)
+        // Metal writes the buffer on the GPU only: no CPU lock (it would only make the IOSurface sync for the CPU).
+        let locksBuffer = !(renderer is ScreenRendererByMetal)
+        if locksBuffer {
+            try? sampleBuffer.imageBuffer?.lockBaseAddress(Self.lockFlags)
+        }
         defer {
-            try? sampleBuffer.imageBuffer?.unlockBaseAddress(Self.lockFlags)
+            if locksBuffer {
+                try? sampleBuffer.imageBuffer?.unlockBaseAddress(Self.lockFlags)
+            }
         }
         renderer.presentationTimeStamp = sampleBuffer.presentationTimeStamp
         renderer.setTarget(sampleBuffer.imageBuffer)
@@ -223,6 +253,13 @@ public final class Screen: ScreenObjectContainerConvertible {
             return
         }
         videoCaptureLatency += (diff - videoCaptureLatency) * Self.videoCaptureLatencySmoothing
+    }
+
+    private func makeRenderer() -> any ScreenRenderer {
+        if renderingBackend == .metal, let renderer = ScreenRendererByMetal(dynamicRangeMode: dynamicRangeMode) {
+            return renderer
+        }
+        return ScreenRendererByGPU(dynamicRangeMode: dynamicRangeMode)
     }
 
     func reset() {
