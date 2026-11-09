@@ -4,9 +4,7 @@ struct RTMPURL {
     let url: URL
 
     var streamName: String {
-        var pathComponents = url.pathComponents
-        pathComponents.removeFirst()
-        pathComponents.removeFirst()
+        let pathComponents = url.pathComponents.dropFirst(2)
         if let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.query {
             return pathComponents.joined(separator: "/") + "?" + query
         } else {

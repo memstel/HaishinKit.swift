@@ -28,17 +28,23 @@ Sponsor: [$50 per month](https://github.com/sponsors/shogo4405): Technical suppo
 ## 🌏 Requirements
 
 ### Development
+
 |Version|Xcode|Swift|
 |:----:|:----:|:----:|
-|2.2.0+|26.0+|6.0+|
-|2.1.0+|16.4+|6.0+|
+|2.3.0+|26.0+|6.0+|
+|2.2.x|26.0+|6.0+|
+|2.1.x|16.4+|6.0+|
+
+The package declares Swift tools version 6.0. CI uses Xcode 26.6 for testing and documentation builds.
 
 ### OS
-|iOS|tvOS|Mac Catalyst|macOS|visionOS|watchOS|
-|:-:|:-:|:-:|:-:|:-:|:-:|
-|15.0+|15.0+|15.0+|12.0+|1.0+|-|
 
-- SRTHaishinKit is not avaliable for Mac Catalyst. 
+|Version|iOS|tvOS|Mac Catalyst|macOS|visionOS|watchOS|
+|:-:|:-:|:-:|:-:|:-:|:-:|:-:|
+|2.3.0+|15.0+|15.0+|15.0+|12.0+|1.3+|-|
+|2.2.x|15.0+|15.0+|15.0+|12.0+|1.0+|-|
+
+- The libsrt 1.5.7 dependency includes arm64 Mac Catalyst support. HaishinKit currently has a separate Mac Catalyst build issue in `TextScreenObject.swift` (`NSColor` is unavailable).
 
 ## 📖 Getting Started
 
@@ -95,7 +101,7 @@ Please make sure to contains `Info.plist` the following values when accessing th
 
 ## 📃 Documentation
 - [API Documentation](https://docs.haishinkit.com/swift/latest/documentation/)
-- [Migration Guide](https://github.com/HaishinKit/HaishinKit.swift/wiki#-migration-guide)
+- [Migration Guide](HaishinKit/Sources/Docs.docc/migration-guide.md)
 
 ## 🌏 Related projects
 Project name    |Notes       |License

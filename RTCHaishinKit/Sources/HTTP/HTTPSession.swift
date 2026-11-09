@@ -40,6 +40,9 @@ actor HTTPSession: StreamSession {
         guard _readyState.value == .closed else {
             return
         }
+        guard let scheme = uri.scheme, ["http", "https"].contains(scheme), let host = uri.host, !host.isEmpty else {
+            throw URLError(.badURL)
+        }
         _readyState.value = .connecting
         let peerConnection = try makePeerConnection()
         switch mode {

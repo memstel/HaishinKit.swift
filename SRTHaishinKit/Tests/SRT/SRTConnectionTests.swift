@@ -5,6 +5,22 @@ import libsrt
 @testable import SRTHaishinKit
 
 @Suite struct SRTConnectionTests {
+    @Test(arguments: ["srt:/", "srt:/localhost:9000", "srt:localhost:9000"])
+    func rejectsMalformedURL(_ value: String) async throws {
+        let uri = try #require(URL(string: value))
+        let connection = SRTConnection()
+        await #expect {
+            try await connection.connect(uri)
+        } throws: { error in
+            guard case SRTConnection.Error.unsupportedUri(let value) = error else {
+                return false
+            }
+            return value == uri
+        }
+        #expect(await connection.connected == false)
+        #expect(await connection.uri == nil)
+    }
+
     @Test func streamid_success() async throws {
         Task {
             let listener = SRTConnection()

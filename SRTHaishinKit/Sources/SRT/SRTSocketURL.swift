@@ -44,7 +44,7 @@ struct SRTSocketURL {
     }
 
     init?(_ url: URL?) {
-        guard let url, let scheme = url.scheme, scheme == "srt" else {
+        guard let url, let scheme = url.scheme, scheme == "srt", url.host != nil else {
             return nil
         }
         let queryItems = Self.getQueryItems(url)

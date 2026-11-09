@@ -314,7 +314,7 @@ public actor RTMPConnection: HaishinKit.NetworkConnection {
         guard !connected else {
             throw Error.invalidState
         }
-        guard let uri = URL(string: command), let scheme = uri.scheme, let host = uri.host, Self.supportedProtocols.contains(scheme) else {
+        guard let uri = URL(string: command), let scheme = uri.scheme, let host = uri.host, !host.isEmpty, Self.supportedProtocols.contains(scheme) else {
             throw Error.unsupportedCommand(command)
         }
         self.uri = uri

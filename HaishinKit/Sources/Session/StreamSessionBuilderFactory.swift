@@ -29,8 +29,9 @@ public actor StreamSessionBuilderFactory {
     }
 
     /// Makes a new session builder.
+    /// - Throws: `Error.illegalArgument` if the URL has no scheme or host. SRT listener URLs may have an empty host.
     public func make(_ uri: URL?) throws -> StreamSessionBuilder {
-        guard let uri else {
+        guard let uri, let scheme = uri.scheme, let host = uri.host, !host.isEmpty || scheme == "srt" else {
             throw Error.illegalArgument
         }
         return StreamSessionBuilder(factory: self, uri: uri)
@@ -45,10 +46,10 @@ public actor StreamSessionBuilderFactory {
     }
 
     func build(_ uri: URL?, method: StreamSessionMode, configuration: (any StreamSessionConfiguration)?) throws -> (any StreamSession) {
-        guard let uri else {
+        guard let uri, let scheme = uri.scheme, let host = uri.host, !host.isEmpty || scheme == "srt" else {
             throw Error.illegalArgument
         }
-        for factory in factories where factory.supportedProtocols.contains(uri.scheme ?? "") {
+        for factory in factories where factory.supportedProtocols.contains(scheme) {
             return factory.make(uri, mode: method, configuration: configuration)
         }
         throw Error.notFound
