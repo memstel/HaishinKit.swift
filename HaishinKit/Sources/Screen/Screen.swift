@@ -22,6 +22,13 @@ public final class Screen: ScreenObjectContainerConvertible {
 
     private static let lockFlags = CVPixelBufferLockFlags(rawValue: 0)
     private static let preferredTimescale: CMTimeScale = 1000000000
+    /// The capture latency is measured again on every camera frame against the last rendered display tick. Camera and
+    /// display are not in phase, so near their phase boundary the measurement flips by a whole frame from one camera
+    /// frame to the next; applied as it came, each flip moved a frame's stamp by a frame (two stamps almost equal, then
+    /// a two-frame gap), which players show as a stutter of the whole picture. Changes this small are averaged in;
+    /// a larger one (a new capture setup) is taken at once.
+    static let videoCaptureLatencySmoothing = 0.05
+    static let videoCaptureLatencyJump: TimeInterval = 0.05
 
     /// The total of child counts.
     public var childCounts: Int {
@@ -90,7 +97,8 @@ public final class Screen: ScreenObjectContainerConvertible {
     }
     private(set) var targetTimestamp: TimeInterval = 0.0
     private(set) var videoTrackScreenObject = VideoScreenObject()
-    private var videoCaptureLatency: TimeInterval = 0.0
+    private(set) var videoCaptureLatency: TimeInterval = 0.0
+    private var hasVideoCaptureLatency = false
     private(set) var root: ScreenObjectContainer = .init()
     private var outputFormat: CMFormatDescription?
     private var pixelBufferPool: CVPixelBufferPool? {
@@ -209,7 +217,12 @@ public final class Screen: ScreenObjectContainerConvertible {
         }
         let hostPresentationTimeStamp = presentationTimeStamp.convertTime(from: synchronizationClock)
         let diff = ceil((targetTimestamp - hostPresentationTimeStamp.seconds) * 10000) / 10000
-        videoCaptureLatency = diff
+        guard hasVideoCaptureLatency, abs(diff - videoCaptureLatency) < Self.videoCaptureLatencyJump else {
+            videoCaptureLatency = diff
+            hasVideoCaptureLatency = true
+            return
+        }
+        videoCaptureLatency += (diff - videoCaptureLatency) * Self.videoCaptureLatencySmoothing
     }
 
     func reset() {

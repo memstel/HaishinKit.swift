@@ -98,8 +98,11 @@ struct DisplayLinkTime {
 final class DisplayLinkChoreographer: NSObject {
     private static let preferredFramesPerSecond = 0
 
+    // Only the newest tick is kept: a consumer slower than the display skips stale ticks instead of
+    // queueing them (an unbounded queue made the offscreen screen lag ever further behind real time
+    // and keep rendering the backlog after stopRunning()).
     var updateFrames: AsyncStream<DisplayLinkTime> {
-        AsyncStream { continuation in
+        AsyncStream(bufferingPolicy: .bufferingNewest(1)) { continuation in
             self.continutation = continuation
         }
     }
