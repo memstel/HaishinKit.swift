@@ -401,6 +401,8 @@ public actor RTMPStream {
     private var outboundAudioTimestamp: RTMPTimestamp<CMTime> = .init()
     private var videoTimestamp: RTMPTimestamp<CMTime> = .init()
     private var requestTimeout = RTMPConnection.defaultRequestTimeout
+    /// The longest wait (ms) for the replies of `deleteStream()`'s `FCUnpublish` and `deleteStream`.
+    static let teardownReplyTimeout: UInt64 = 1000
     private var isWireSessionReusable = true
     package var bitRateStrategy: (any StreamBitRateStrategy)?
     private var statusContinuation: AsyncStream<RTMPStatus>.Continuation?
@@ -916,9 +918,11 @@ public actor RTMPStream {
 
     func createStream() async {
         if let fcPublishName {
-            // FMLE-compatible sequences
-            async let _ = connection?.call("releaseStream", arguments: fcPublishName)
-            async let _ = connection?.call("FCPublish", arguments: fcPublishName)
+            // FMLE-compatible sequences, sent before createStream without waiting for their replies (as FMLE and
+            // ffmpeg do): YouTube answers FCPublish with onFCPublish, which matches no transaction, so every connect
+            // waited the request timeout.
+            await connection?.callWithoutReply("releaseStream", arguments: fcPublishName)
+            await connection?.callWithoutReply("FCPublish", arguments: fcPublishName)
         }
         do {
             let response = try await connection?.call("createStream")
@@ -956,8 +960,12 @@ public actor RTMPStream {
             return
         }
         let connection = self.connection
-        async let fcUnpublish = try? connection?.call("FCUnpublish", arguments: fcPublishName)
-        async let delete = try? connection?.call("deleteStream", arguments: id)
+        // No reply is needed: deleteStream has none (RTMP 1.0, 7.2.2.3) and servers answer FCUnpublish differently
+        // (YouTube with onFCUnpublish), so each waited the request timeout before the socket closed. The short wait
+        // only lets both commands leave before the connection closes the socket.
+        let replyTimeout = min(requestTimeout, Self.teardownReplyTimeout)
+        async let fcUnpublish = try? connection?.call("FCUnpublish", timeout: replyTimeout, arguments: [fcPublishName])
+        async let delete = try? connection?.call("deleteStream", timeout: replyTimeout, arguments: [id])
         _ = await fcUnpublish
         guard teardownState.matches(teardownToken) else {
             return

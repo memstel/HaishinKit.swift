@@ -285,6 +285,11 @@ public actor RTMPConnection: HaishinKit.NetworkConnection {
 
     /// Calls a command or method on RTMP Server.
     public func call(_ commandName: String, arguments: (any Sendable)?...) async throws -> RTMPResponse {
+        try await call(commandName, timeout: requestTimeout, arguments: arguments)
+    }
+
+    /// Calls a command and waits at most `timeout` ms for its reply.
+    func call(_ commandName: String, timeout: UInt64, arguments: [(any Sendable)?]) async throws -> RTMPResponse {
         guard connected else {
             throw Error.invalidState
         }
@@ -298,7 +303,7 @@ public actor RTMPConnection: HaishinKit.NetworkConnection {
                 arguments: arguments
             )
             Task {
-                try? await Task.sleep(nanoseconds: requestTimeout * 1_000_000)
+                try? await Task.sleep(nanoseconds: timeout * 1_000_000)
                 guard let operation = operations.removeValue(forKey: message.transactionId) else {
                     return
                 }
@@ -307,6 +312,24 @@ public actor RTMPConnection: HaishinKit.NetworkConnection {
             operations[message.transactionId] = continutation
             doOutput(.zero, chunkStreamId: .command, message: message)
         }
+    }
+
+    /// Sends a command nobody waits for: FMLE's `releaseStream` and `FCPublish`, which servers answer differently
+    /// (YouTube with `onFCPublish`, which matches no transaction) or not at all. A reply that still arrives is ignored
+    /// like any reply without a waiting call. The command goes out in call order, before any later command.
+    func callWithoutReply(_ commandName: String, arguments: (any Sendable)?...) {
+        guard connected else {
+            return
+        }
+        let message = RTMPCommandMessage(
+            streamId: 0,
+            transactionId: newTransaction,
+            objectEncoding: objectEncoding,
+            commandName: commandName,
+            commandObject: nil,
+            arguments: arguments
+        )
+        doOutput(.zero, chunkStreamId: .command, message: message)
     }
 
     /// Creates a two-way connection to an application on RTMP Server.
